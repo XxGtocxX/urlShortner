@@ -1,11 +1,12 @@
 from flask import Flask, request, jsonify, redirect
 from flask_sqlalchemy import SQLAlchemy
+from redis_client import redis_client
 import random
 import string
 
 app = Flask(__name__)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///urls.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:0808@localhost/url_shortener'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
@@ -75,20 +76,33 @@ def shorten_url():
 @app.route('/<short_code>')
 def redirect_url(short_code):
 
+    # Check Redis cache first
+    cached_url = redis_client.get(short_code)
+
+    if cached_url:
+        print("Redis HIT")
+        return redirect(cached_url)
+
+    print("Redis MISS")
+
+    # Fallback to PostgreSQL
     url = URL.query.filter_by(
         short_code=short_code
     ).first()
 
     if url:
 
-        # Increase click count
+        # Store in Redis
+        redis_client.set(short_code, url.long_url)
+
         url.clicks += 1
         db.session.commit()
 
         return redirect(url.long_url)
 
-    return jsonify({'error': 'URL not found'}), 404
-
+    return jsonify({
+        'error': 'URL not found'
+    }), 404
 # Analytics API
 @app.route('/stats/<short_code>')
 def get_stats(short_code):
