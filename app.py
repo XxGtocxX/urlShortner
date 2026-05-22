@@ -1,12 +1,14 @@
 from flask import Flask, request, jsonify, redirect
 from flask_sqlalchemy import SQLAlchemy
 from redis_client import redis_client
-import random
-import string
+import os
 
 app = Flask(__name__)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:0808@localhost/url_shortener'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+    'DATABASE_URL',
+    'postgresql://postgres:0808@localhost:5432/url_shortener'
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
@@ -18,24 +20,22 @@ class URL(db.Model):
     short_code = db.Column(db.String(10), unique=True)
     clicks = db.Column(db.Integer, default=0)
 
-# Generate unique short code
-def generate_short_code(length=6):
+BASE62 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-    characters = string.ascii_letters + string.digits
+def encode_base62(num):
 
-    while True:
-        short_code = ''.join(
-            random.choice(characters)
-            for _ in range(length)
-        )
+    if num == 0:
+        return BASE62[0]
 
-        # Check if code already exists
-        existing_url = URL.query.filter_by(
-            short_code=short_code
-        ).first()
+    result = []
 
-        if not existing_url:
-            return short_code
+    while num > 0:
+        remainder = num % 62
+        result.append(BASE62[remainder])
+        num //= 62
+
+    return ''.join(reversed(result))
+
 @app.route('/')
 def home():
     return "URL Shortener Running!"
@@ -59,14 +59,18 @@ def shorten_url():
     if not long_url:
         return jsonify({'error': 'URL is required'}), 400
 
-    short_code = generate_short_code()
-
     new_url = URL(
-        long_url=long_url,
-        short_code=short_code
+        long_url=long_url
     )
 
     db.session.add(new_url)
+    db.session.commit()
+
+    # Generate Base62 short code
+    short_code = encode_base62(new_url.id)
+
+    new_url.short_code = short_code
+
     db.session.commit()
 
     return jsonify({
@@ -79,30 +83,31 @@ def redirect_url(short_code):
     # Check Redis cache first
     cached_url = redis_client.get(short_code)
 
+    # Always fetch DB row for analytics
+    url = URL.query.filter_by(
+        short_code=short_code
+    ).first()
+
+    if not url:
+        return jsonify({
+            'error': 'URL not found'
+        }), 404
+
+    # Increment clicks
+    url.clicks += 1
+    db.session.commit()
+
+    # Redis HIT
     if cached_url:
         print("Redis HIT")
         return redirect(cached_url)
 
     print("Redis MISS")
 
-    # Fallback to PostgreSQL
-    url = URL.query.filter_by(
-        short_code=short_code
-    ).first()
+    # Store in Redis
+    redis_client.set(short_code, url.long_url)
 
-    if url:
-
-        # Store in Redis
-        redis_client.set(short_code, url.long_url)
-
-        url.clicks += 1
-        db.session.commit()
-
-        return redirect(url.long_url)
-
-    return jsonify({
-        'error': 'URL not found'
-    }), 404
+    return redirect(url.long_url)
 # Analytics API
 @app.route('/stats/<short_code>')
 def get_stats(short_code):
@@ -126,4 +131,4 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()
 
-    app.run(debug=True)
+    app.run(host='0.0.0.0', debug=False)
