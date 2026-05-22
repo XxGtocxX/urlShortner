@@ -81,7 +81,13 @@ def shorten_url():
 def redirect_url(short_code):
 
     # Check Redis cache first
-    cached_url = redis_client.get(short_code)
+    cached_url = None
+
+    if redis_client:
+        try:
+            cached_url = redis_client.get(short_code)
+        except:
+            pass
 
     # Always fetch DB row for analytics
     url = URL.query.filter_by(
@@ -105,7 +111,11 @@ def redirect_url(short_code):
     print("Redis MISS")
 
     # Store in Redis
-    redis_client.set(short_code, url.long_url)
+    if redis_client:
+        try:
+            redis_client.set(short_code, url.long_url)
+        except:
+            pass
 
     return redirect(url.long_url)
 # Analytics API
