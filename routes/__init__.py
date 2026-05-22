@@ -29,10 +29,8 @@ def register_routes(app):
 
         if existing_url:
             return jsonify({
-                'short_url':
-                f'http://127.0.0.1:5000/{existing_url.short_code}'
+                'short_url': request.host_url + existing_url.short_code
             })
-
         short_code = generate_short_code(URL)
 
         new_url = URL(
@@ -44,8 +42,7 @@ def register_routes(app):
         db.session.commit()
 
         return jsonify({
-            'short_url':
-            f'http://127.0.0.1:5000/{short_code}'
+            'short_url': request.host_url + short_code
         })
 
     @app.route('/<short_code>')
@@ -54,27 +51,28 @@ def register_routes(app):
         # Check Redis cache first
         cached_url = redis_client.get(short_code)
 
-        if cached_url:
-            return redirect(cached_url)
-
-        # Fallback to PostgreSQL
+        # Always fetch DB for analytics
         url = URL.query.filter_by(
             short_code=short_code
         ).first()
 
-        if url:
+        if not url:
+            return jsonify({
+                'error': 'URL not found'
+            }), 404
 
-            # Store in Redis
-            redis_client.set(short_code, url.long_url)
+        # Increment clicks
+        url.clicks += 1
+        db.session.commit()
 
-            url.clicks += 1
-            db.session.commit()
+        # Redis HIT
+        if cached_url:
+            return redirect(cached_url.decode('utf-8'))
 
-            return redirect(url.long_url)
+        # Redis MISS
+        redis_client.set(short_code, url.long_url)
 
-        return jsonify({
-            'error': 'URL not found'
-        }), 404
+        return redirect(url.long_url)
 
     @app.route('/stats/<short_code>')
     def get_stats(short_code):
