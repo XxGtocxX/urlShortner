@@ -53,7 +53,7 @@ def shorten_url():
 
     if existing_url:
         return jsonify({
-            'short_url': f'http://127.0.0.1:5000/{existing_url.short_code}'
+            'short_url': request.host_url + existing_url.short_code
         })
 
     if not long_url:
@@ -74,7 +74,7 @@ def shorten_url():
     db.session.commit()
 
     return jsonify({
-        'short_url': f'http://127.0.0.1:5000/{short_code}'
+        'short_url': request.host_url + short_code
     })
 # Redirect to original URL
 @app.route('/<short_code>')
