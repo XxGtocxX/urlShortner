@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, redirect
+from flask import Flask, request, jsonify, redirect, render_template
 from flask_sqlalchemy import SQLAlchemy
 from redis_client import redis_client
 import os
@@ -38,7 +38,7 @@ def encode_base62(num):
 
 @app.route('/')
 def home():
-    return "URL Shortener Running!"
+    return render_template('index.html')
 
 # API to shorten URL
 @app.route('/shorten', methods=['POST'])
